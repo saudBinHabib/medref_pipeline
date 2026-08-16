@@ -1,0 +1,21 @@
+pzn,name,active_ingredient,dosage_form,strength,prescription_only,price,manufacturer,atc_code
+00000022,Novapex Paracetamol Forte,Paracetamol,tablet,250mg,true,14.37,Blauberg Labs,N02BE01
+00000060,Curalin Enalapril Forte,Enalapril,injection,2ml,true,42.89,Alpenrose Labs,C09AA02
+00000017,Curalin Metoprolol Forte,Metoprolol,cream,2%,false,6.90,Nordwind Biosciences,C07AB02
+00000069,Rekura Erythromycin Forte,Erythromycin,injection,1ml,true,35.67,Nordhealth Pharma,J01FA01
+00000004,Sanavia Salbutamol Forte,Salbutamol,injection,1ml,true,21.02,Rheinquell Pharma,R03AC02
+00000051,Medo Metoprolol Forte,Metoprolol,capsule,250mg,false,31.10,Nordhealth Pharma,C07AB02
+00000073,Vitapharm Atorvastatin Forte,Atorvastatin,drops,10ml,false,69.10,Sonnenberg Medica,C10AA05
+00000076,Biovex Erythromycin Forte,Erythromycin,drops,15ml,true,35.67,Alpenrose Labs,J01FA01
+00000011,Pharmatec Metoclopramide Forte,Metoclopramide,drops,5ml,false,68.29,Greenfield Pharmaceuticals,A03FA01
+00000055,Biovex Salbutamol Forte,Salbutamol,solution,20mg/ml,true,75.29,Nordhealth Pharma,R03AC02
+00000081,Curalin Diazepam,Diazepam,spray,100mcg,true,68.03,Nordhealth Pharma,N05BA01
+00000082,Curalin Fluoxetine,Fluoxetine,capsule,800mg,true,68.49,Greenfield Pharmaceuticals,N06AB03
+00000083,Medo Insulin,Insulin (human),spray,50mcg,true,13.54,Blauberg Labs,A10AB01
+00000084,Vitapharm Lorazepam,Lorazepam,capsule,800mg,false,69.60,Vitalis Biotech,N05BA06
+00000085,Curalin Amlodipine,Amlodipine,cream,1%,false,11.96,Nordhealth Pharma,C08CA01
+00000086,Rekura Loratadine,Loratadine,cream,2%,true,9.15,Greenfield Pharmaceuticals,R06AX13
+00000087,Sanavia Metformin,Metformin,drops,15ml,true,72.16,Nordhealth Pharma,A10BA02
+00000088,Rekura Fluoxetine,Fluoxetine,cream,5%,false,8.53,Rheinquell Pharma,N06AB03
+00000089,Rekura Paracetamol,Paracetamol,spray,100mcg,true,40.43,Rheinquell Pharma,N02BE01
+00000090,Biovex Acetylsalicylic,Acetylsalicylic acid,drops,10ml,true,66.70,Sonnenberg Medica,B01AC06

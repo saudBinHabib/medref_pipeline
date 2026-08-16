@@ -1,0 +1,9 @@
+pzn,name,active_ingredient,dosage_form,strength,prescription_only,price,manufacturer,atc_code
+10000002,,Paracetamol,tablet,500mg,false,9.99,Nordhealth Pharma,N02BE01
+ABCDEFGH,Testodol,Paracetamol,tablet,500mg,false,9.99,Nordhealth Pharma,N02BE01
+123,Testodol,Paracetamol,tablet,500mg,false,9.99,Nordhealth Pharma,N02BE01
+10000003,Testodol,Paracetamol,lozenge,500mg,false,9.99,Nordhealth Pharma,N02BE01
+10000004,Testodol,Paracetamol,tablet,500mg,maybe,9.99,Nordhealth Pharma,N02BE01
+10000005,Testodol,Paracetamol,tablet,500mg,false,-5.00,Nordhealth Pharma,N02BE01
+10000006,Testodol,Paracetamol,tablet,500mg,false,9.99,Nordhealth Pharma,N02BE01
+10000006,Testodol,Paracetamol,tablet,500mg,false,9.99,Nordhealth Pharma,N02BE01

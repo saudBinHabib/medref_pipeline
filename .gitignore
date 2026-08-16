@@ -7,3 +7,4 @@ dead_letter/*
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
+.superpowers/

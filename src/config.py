@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     api_port: int = 8000
 
     atc_remote_lookup: bool = False
-    anthropic_api_key: str | None = None
+    deepseek_api_key: str | None = None
 
     @property
     def sqlalchemy_database_url(self) -> str:

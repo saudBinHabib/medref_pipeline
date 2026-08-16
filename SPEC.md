@@ -157,7 +157,7 @@ Requirements:
 ### 6.1 Optional endpoint (implement only if core is complete)
 | Method | Path | Behavior |
 |---|---|---|
-| POST | `/v1/ask` | Body `{question: str}`. Retrieves relevant medication rows and calls the Anthropic API to answer in natural language, citing the PZNs used. Requires `ANTHROPIC_API_KEY` env var. |
+| POST | `/v1/ask` | Body `{question: str}`. Retrieves relevant medication rows and calls the DeepSeek API (OpenAI-compatible chat completions, model `deepseek-chat`) to answer in natural language, citing the PZNs used. Requires `DEEPSEEK_API_KEY` env var. |
 
 ---
 

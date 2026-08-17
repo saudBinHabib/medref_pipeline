@@ -10,11 +10,14 @@ A batch data pipeline and REST API for drug reference data. The pipeline ingests
 
 ### Option 1: Docker Compose (Recommended)
 
-Start Postgres and the API server with a single command. Migrations apply automatically via an init script:
+Copy the example environment file, then start Postgres and the API server with a single command. Migrations apply automatically via an init script:
 
 ```bash
+cp .env.example .env
 docker-compose up -d
 ```
+
+Review `.env` and adjust values (e.g. `DEEPSEEK_API_KEY` if you want the optional `/v1/ask` endpoint) before or after starting the stack.
 
 The API will be available at `http://localhost:8000` once the postgres service is healthy.
 

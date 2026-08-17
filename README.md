@@ -4,6 +4,8 @@ A batch data pipeline and REST API for drug reference data. The pipeline ingests
 
 **Full specification:** see [SPEC.md](SPEC.md) (SPEC.md §1–11 for core architecture and acceptance criteria).
 
+**Deploying to AWS:** see [AWS_Deployment_Plan.md](AWS_Deployment_Plan.md) for the architecture, and [infra/README.md](infra/README.md) for day-to-day start/stop/destroy operations.
+
 ---
 
 ## Data Model

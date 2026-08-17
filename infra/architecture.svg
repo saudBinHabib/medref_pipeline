@@ -1,0 +1,162 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1820 860" width="1820" height="860" role="img" aria-label="Architecture diagram: a client reaches the ALB, which forwards to the ECS API service inside a public subnet; the API reads and writes RDS in an isolated subnet and calls out to DeepSeek; an EventBridge schedule runs the pipeline task, which reads a feed from the raw-landing S3 bucket, writes rejects to the dead-letter bucket, and loads RDS; a one-off migrate task applies the schema; all three ECS tasks share one ECR image and read two Secrets Manager entries; a not-yet-applied CI/CD phase would let GitHub Actions push new images via OIDC.">
+  <style>
+    svg { background: #eef0ea; }
+    .boundary-aws { fill: none; stroke: #2c6e64; stroke-width: 1.5; stroke-dasharray: 7 5; opacity: 0.55; }
+    .boundary-vpc { fill: none; stroke: #2c6e64; stroke-width: 1.5; stroke-dasharray: 5 4; opacity: 0.85; }
+    .boundary-sub { fill: none; stroke: #6f7b71; stroke-width: 1; stroke-dasharray: 3 3; }
+    .boundary-cicd { fill: none; stroke: #a86e21; stroke-width: 1.5; stroke-dasharray: 7 5; }
+    .node { fill: #eef0ea; stroke: #1b2420; stroke-width: 1.3; }
+    .node-accent { fill: #eef0ea; stroke: #a86e21; stroke-width: 1.6; }
+    .node-actor { fill: none; stroke: #1b2420; stroke-width: 1.3; stroke-dasharray: 4 3; }
+    .node-store { fill: #eef0ea; stroke: #1b2420; stroke-width: 1.3; }
+    .title-text { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size: 13px; font-weight: 600; fill: #1b2420; text-anchor: middle; }
+    .sub-text { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size: 10px; fill: #6f7b71; text-anchor: middle; }
+    .boundary-label { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; fill: #1c4941; }
+    .boundary-label-accent { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; fill: #6e4813; }
+    .edge { fill: none; stroke: #1b2420; stroke-width: 1.5; }
+    .edge-dashed { fill: none; stroke: #45524b; stroke-width: 1.3; stroke-dasharray: 4 3; }
+    .edge-accent { fill: none; stroke: #a86e21; stroke-width: 1.5; }
+    .edge-label { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size: 10.5px; fill: #45524b; }
+    .edge-label-accent { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size: 10.5px; fill: #6e4813; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1b2420" />
+    </marker>
+    <marker id="arrow-soft" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#45524b" />
+    </marker>
+    <marker id="arrow-accent" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#a86e21" />
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1820" height="860" fill="#eef0ea" />
+
+  <!-- external actors -->
+  <rect class="node-actor" x="20" y="20" width="220" height="60" rx="8" />
+  <text class="title-text" x="130" y="46">GitHub</text>
+  <text class="sub-text" x="130" y="62">saudBinHabib/medref-pipeline</text>
+
+  <circle class="node-actor" cx="185" cy="50" r="32" />
+  <text class="title-text" x="185" y="54">Client</text>
+
+  <rect class="node-actor" x="1540" y="20" width="260" height="60" rx="8" />
+  <text class="title-text" x="1670" y="46">api.deepseek.com</text>
+  <text class="sub-text" x="1670" y="62">external &middot; LLM completion</text>
+
+  <!-- AWS account boundary -->
+  <rect class="boundary-aws" x="20" y="120" width="1780" height="680" rx="10" />
+  <text class="boundary-label" x="40" y="142">AWS Account &middot; us-east-1</text>
+
+  <!-- VPC boundary -->
+  <rect class="boundary-vpc" x="50" y="160" width="860" height="400" rx="8" />
+  <text class="boundary-label" x="65" y="180">VPC 10.0.0.0/16</text>
+
+  <!-- public subnets -->
+  <rect class="boundary-sub" x="80" y="205" width="800" height="190" rx="6" />
+  <text class="boundary-label" x="95" y="222" style="font-size:10px;">Public subnets &middot; IGW route &middot; public IP</text>
+
+  <rect class="node" x="100" y="250" width="170" height="60" rx="6" />
+  <text class="title-text" x="185" y="276">ALB</text>
+  <text class="sub-text" x="185" y="292">medref-alb &middot; :80</text>
+
+  <rect class="node" x="290" y="250" width="170" height="60" rx="6" />
+  <text class="title-text" x="375" y="272">medref-api</text>
+  <text class="sub-text" x="375" y="287">0.25vCPU/0.5GB</text>
+  <text class="sub-text" x="375" y="299">:8000</text>
+
+  <rect class="node" x="480" y="250" width="170" height="60" rx="6" />
+  <text class="title-text" x="565" y="272">medref-pipeline</text>
+  <text class="sub-text" x="565" y="287">0.5vCPU/1GB</text>
+  <text class="sub-text" x="565" y="299">task, on schedule</text>
+
+  <rect class="node" x="670" y="250" width="170" height="60" rx="6" />
+  <text class="title-text" x="755" y="272">medref-migrate</text>
+  <text class="sub-text" x="755" y="287">one-off task</text>
+  <text class="sub-text" x="755" y="299">applies schema</text>
+
+  <!-- isolated subnet -->
+  <rect class="boundary-sub" x="80" y="415" width="320" height="125" rx="6" />
+  <text class="boundary-label" x="95" y="432" style="font-size:10px;">Isolated subnet &middot; no route, not even NAT</text>
+
+  <rect class="node-store" x="120" y="450" width="220" height="60" rx="6" />
+  <text class="title-text" x="230" y="474">RDS Postgres 16</text>
+  <text class="sub-text" x="230" y="490">db.t4g.micro &middot; single-AZ</text>
+
+  <!-- right column: outside VPC, inside AWS -->
+  <rect class="node" x="970" y="205" width="220" height="60" rx="6" />
+  <text class="title-text" x="1080" y="230">ECR: medref-app</text>
+  <text class="sub-text" x="1080" y="246">1 image &middot; 3 task defs</text>
+  <text class="sub-text" x="1080" y="258">via CMD override</text>
+
+  <rect class="node" x="1250" y="205" width="260" height="60" rx="6" />
+  <text class="title-text" x="1380" y="230">EventBridge Scheduler</text>
+  <text class="sub-text" x="1380" y="246">every other Mon</text>
+  <text class="sub-text" x="1380" y="258">03:00 UTC</text>
+
+  <rect class="node-store" x="970" y="300" width="220" height="55" rx="6" />
+  <text class="title-text" x="1080" y="323">S3: raw-landing</text>
+  <text class="sub-text" x="1080" y="339">feed CSVs land here</text>
+
+  <rect class="node-store" x="970" y="390" width="220" height="55" rx="6" />
+  <text class="title-text" x="1080" y="413">S3: dead-letter</text>
+  <text class="sub-text" x="1080" y="429">rejected rows, per run_id</text>
+
+  <rect class="node" x="1250" y="300" width="260" height="55" rx="6" />
+  <text class="title-text" x="1380" y="323">Secrets Manager</text>
+  <text class="sub-text" x="1380" y="339">deepseek-api-key (manual)</text>
+
+  <rect class="node" x="1250" y="390" width="260" height="55" rx="6" />
+  <text class="title-text" x="1380" y="413">CloudWatch Logs</text>
+  <text class="sub-text" x="1380" y="429">all 3 ECS tasks write here</text>
+
+  <!-- CI/CD, not yet applied -->
+  <rect class="boundary-cicd" x="80" y="590" width="800" height="140" rx="8" />
+  <text class="boundary-label-accent" x="95" y="608">Phase 4 &middot; coded, not yet applied</text>
+
+  <rect class="node-accent" x="130" y="635" width="420" height="65" rx="6" />
+  <text class="title-text" x="340" y="661">IAM OIDC provider + deploy role</text>
+  <text class="sub-text" x="340" y="677">repo:...:ref:refs/heads/main only</text>
+  <text class="sub-text" x="340" y="690">then: ecs update-service (pulls new image)</text>
+
+  <!-- edges -->
+  <line class="edge" x1="185" y1="82" x2="185" y2="248" marker-end="url(#arrow)" />
+  <text class="edge-label" x="195" y="170">:80</text>
+
+  <line class="edge" x1="270" y1="280" x2="288" y2="280" marker-end="url(#arrow)" />
+  <text class="edge-label" x="215" y="272" style="font-size:9.5px;">:8000</text>
+
+  <line class="edge" x1="375" y1="310" x2="255" y2="465" marker-end="url(#arrow)" />
+  <text class="edge-label" x="290" y="380">:5432</text>
+
+  <polyline class="edge" points="375,250 375,105 1670,105 1670,92" marker-end="url(#arrow)" />
+  <text class="edge-label" x="900" y="98">outbound HTTPS &middot; /v1/ask</text>
+
+  <line class="edge-dashed" x1="460" y1="288" x2="1248" y2="322" marker-end="url(#arrow-soft)" />
+  <text class="edge-label" x="720" y="298">secrets: DATABASE_URL, DEEPSEEK_API_KEY</text>
+
+  <polyline class="edge" points="1380,205 1380,180 565,180 565,248" marker-end="url(#arrow)" />
+  <text class="edge-label" x="950" y="175">RunTask</text>
+
+  <polyline class="edge" points="650,270 900,270 900,325 968,325" marker-end="url(#arrow)" />
+  <text class="edge-label" x="770" y="262">download feed</text>
+
+  <polyline class="edge" points="650,292 922,292 922,417 968,417" marker-end="url(#arrow)" />
+  <text class="edge-label" x="770" y="306">upload rejects</text>
+
+  <line class="edge" x1="565" y1="310" x2="345" y2="475" marker-end="url(#arrow)" />
+  <text class="edge-label" x="460" y="368">:5432</text>
+
+  <line class="edge" x1="755" y1="310" x2="235" y2="448" marker-end="url(#arrow)" />
+  <text class="edge-label" x="480" y="432">apply schema (one-off)</text>
+
+  <line class="edge-dashed" x1="840" y1="270" x2="968" y2="238" marker-end="url(#arrow-soft)" />
+  <text class="edge-label" x="855" y="255" style="font-size:9.5px;">pull image</text>
+
+  <polyline class="edge" points="130,80 35,80 35,660 128,660" marker-end="url(#arrow)" />
+  <text class="edge-label" x="42" y="400" style="font-size:9.5px;">OIDC, no stored keys</text>
+
+  <polyline class="edge-accent" points="550,667 930,667 930,235 968,235" marker-end="url(#arrow-accent)" />
+  <text class="edge-label-accent" x="936" y="460" style="font-size:9.5px;">push SHA-tagged image</text>
+</svg>

@@ -41,7 +41,9 @@ MANUFACTURERS = [
     "Sonnenberg Medica", "Rheinquell Pharma", "Alpenrose Labs", "Nordwind Biosciences",
 ]
 
-BRAND_PREFIXES = ["Medo", "Curalin", "Biovex", "Pharmatec", "Sanavia", "Novapex", "Rekura", "Vitapharm"]
+BRAND_PREFIXES = [
+    "Medo", "Curalin", "Biovex", "Pharmatec", "Sanavia", "Novapex", "Rekura", "Vitapharm",
+]
 
 FEED_COLUMNS = [
     "pzn", "name", "active_ingredient", "dosage_form", "strength",

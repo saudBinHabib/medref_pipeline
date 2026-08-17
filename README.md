@@ -6,6 +6,70 @@ A batch data pipeline and REST API for drug reference data. The pipeline ingests
 
 ---
 
+## Data Model
+
+Entity-relationship diagram of the schema defined in [`migrations/001_init.sql`](migrations/001_init.sql) (SPEC.md §3):
+
+```mermaid
+erDiagram
+    MANUFACTURERS ||--o{ MEDICATIONS : "manufactures"
+    ATC_REFERENCE ||--o{ MEDICATIONS : "classifies"
+    MANUFACTURERS ||--o{ MEDICATIONS_STAGING : "manufactures"
+    ATC_REFERENCE ||--o{ MEDICATIONS_STAGING : "classifies"
+
+    MANUFACTURERS {
+        serial manufacturer_id PK
+        text   name UK
+    }
+
+    ATC_REFERENCE {
+        text atc_code PK
+        text atc_description
+    }
+
+    MEDICATIONS {
+        text    pzn PK "8-digit identifier"
+        text    name
+        text    active_ingredient
+        text    dosage_form "tablet | capsule | solution | injection | cream | drops | spray"
+        text    strength
+        boolean prescription_only
+        numeric price
+        int     manufacturer_id FK
+        text    atc_code FK
+    }
+
+    MEDICATIONS_STAGING {
+        text    pzn PK "8-digit identifier"
+        text    name
+        text    active_ingredient
+        text    dosage_form
+        text    strength
+        boolean prescription_only
+        numeric price
+        int     manufacturer_id FK
+        text    atc_code FK
+    }
+
+    PIPELINE_RUNS {
+        uuid        run_id PK
+        text        source_file
+        int         rows_in
+        int         rows_out
+        int         rows_rejected
+        timestamptz started_at
+        timestamptz finished_at
+        text        status "running | success | failed"
+        text        content_hash
+    }
+```
+
+Notes:
+- `medications_staging` mirrors `medications` column-for-column — the load stage writes there first, then atomically upserts into the serving table (SPEC.md §5.5, see [Staging + Upsert vs. Truncate + Replace](#staging--upsert-vs-truncate--replace) below).
+- `pipeline_runs` is standalone lineage metadata (no foreign keys) — one row per pipeline execution, not joined against the other tables.
+
+---
+
 ## Setup
 
 ### Option 1: Docker Compose (Recommended)
@@ -61,7 +125,7 @@ python -m src.pipeline --feed data/feed_broken.csv
 **Output:**
 - **Serving table:** `medications` — the clean, canonical medication records.
 - **Dead-letter:** `dead_letter/<run_id>.csv` — rows rejected during ingestion (invalid schema, missing fields, etc.), with an added `rejection_reason` column.
-- **Lineage:** `pipeline_runs` table — one row per pipeline run, recording `run_id`, `source_file`, `rows_in`, `rows_out`, `rows_rejected`, timestamps, `status` (`running` | `success` | `failed`), and a content hash for idempotency verification.
+- **Lineage:** `pipeline_runs` table — one row per pipeline run, recording `run_id`, `source_file`, `rows_in`, `rows_out`, `rows_rejected`, timestamps, `status` (`running` | `success` | `failed`), and `content_hash` — a stable, order-independent hash of *this run's* loaded batch (the `CleanRecord`s actually written to `medications` in that run, not a snapshot of the whole table). For a full feed this hash is stable across identical re-runs (useful for idempotency verification); for a delta feed it reflects only the delta loaded in that run, not the full serving-table contents. See `src/lineage.py::content_hash` and `tests/test_lineage.py`.
 
 Example: after running all three feeds, query the lineage:
 ```bash
@@ -172,7 +236,7 @@ Idempotency (running the same feed twice yields identical contents) falls out of
 - The upsert ensures each PZN appears exactly once in `medications`, with the latest values.
 - A second run of the same feed updates each row to the same values, leaving `medications` unchanged.
 
-Verified by `test_pipeline.py::test_idempotency`: running `feed_v1.csv` twice produces identical serving-table contents.
+Verified by `test_pipeline.py::test_running_same_feed_twice_is_idempotent`: running `feed_v1.csv` twice produces identical serving-table contents.
 
 ### Dead-Letter vs. Dedup: Different Failure Modes
 

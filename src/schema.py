@@ -9,6 +9,8 @@ ALLOWED_DOSAGE_FORMS = {"tablet", "capsule", "solution", "injection", "cream", "
 ATC_CODE_PATTERN = re.compile(r"^[A-Z]\d{2}[A-Z]{2}\d{2}$")
 _TRUE_VALUES = {"true", "1", "yes"}
 _FALSE_VALUES = {"false", "0", "no"}
+# medications.price is NUMERIC(10,2) in the DB; this is the largest value that fits.
+MAX_PRICE = Decimal("99999999.99")
 
 
 class FeedRow(BaseModel):
@@ -70,8 +72,15 @@ class FeedRow(BaseModel):
             price = Decimal(str(v))
         except InvalidOperation as exc:
             raise ValueError(f"price must be a valid decimal number, got {v!r}") from exc
+        # Guard against NaN/Infinity before any ordering comparison: Decimal("NaN") < 0
+        # raises decimal.InvalidOperation (not ValueError), which Pydantic would not
+        # wrap as a ValidationError and would instead propagate uncaught.
+        if not price.is_finite():
+            raise ValueError(f"price must be a finite number, got {price}")
         if price < 0:
             raise ValueError(f"price must be >= 0, got {price}")
+        if price > MAX_PRICE:
+            raise ValueError(f"price must fit NUMERIC(10,2) (max {MAX_PRICE}), got {price}")
         return price
 
     @field_validator("atc_code")

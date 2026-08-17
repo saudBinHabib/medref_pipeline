@@ -131,6 +131,9 @@ def build_feed_broken() -> list[dict]:
         variant(pzn="10000005", price="-5.00"),                # negative price
         variant(pzn="10000006"),                               # duplicate pzn (1 of 2)
         variant(pzn="10000006"),                               # duplicate pzn (2 of 2)
+        variant(pzn="10000007", atc_code="Z99ZZ99"),           # well-formed but unknown atc_code
+        variant(pzn="10000008", price="9999999999.99"),        # price exceeds NUMERIC(10,2)
+        variant(pzn="10000009", price="NaN"),                  # non-finite price
     ]
 
 

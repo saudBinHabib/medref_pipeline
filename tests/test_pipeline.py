@@ -1,5 +1,6 @@
 """SPEC.md §9 — full end-to-end run; idempotency; broken-feed handling."""
 
+import csv
 from pathlib import Path
 
 from sqlalchemy import text
@@ -68,11 +69,26 @@ def test_broken_feed_rejects_bad_rows_and_loads_valid_ones(clean_db):
 
     assert exit_code == 0
     run_row = clean_db.execute(
-        text("SELECT rows_in, rows_out, rows_rejected FROM pipeline_runs")
+        text("SELECT run_id, rows_in, rows_out, rows_rejected FROM pipeline_runs")
     ).one()
-    assert run_row.rows_in == 8
-    assert run_row.rows_rejected == 6
+    # 11 rows total: 6 schema-invalid (missing field, non-numeric pzn, wrong-length
+    # pzn, bad dosage_form, non-boolean prescription_only, negative price) + 2
+    # duplicate-pzn rows (schema-valid, one dropped by dedup, not by dead-letter)
+    # + 1 unknown-atc_code row (schema-valid, rejected at the pipeline level) + 1
+    # oversized price + 1 NaN price (both now schema-invalid, C3). rows_rejected
+    # covers everything dead-lettered: 6 + 1 (unknown atc) + 2 (price) = 9.
+    assert run_row.rows_in == 11
+    assert run_row.rows_rejected == 9
     assert run_row.rows_out == 1
 
     total = clean_db.execute(text("SELECT COUNT(*) FROM medications")).scalar_one()
     assert total == 1
+
+    # Dead-letter file must record the reason for the unknown-atc_code rejection
+    # (C3: an unresolvable-but-well-formed atc_code must be dead-lettered, not
+    # allowed to abort the whole batch via a downstream FK violation).
+    dead_letter_path = Path("dead_letter") / f"{run_row.run_id}.csv"
+    with open(dead_letter_path, newline="", encoding="utf-8") as fh:
+        reasons = [row["rejection_reason"] for row in csv.DictReader(fh)]
+    assert any("atc_code: unknown code 'Z99ZZ99'" in r for r in reasons)
+    assert len(reasons) == 9

@@ -43,6 +43,8 @@ def test_pzn_preserves_leading_zeros():
         ({"prescription_only": "maybe"}, "prescription_only"),
         ({"price": "-5.00"}, "price"),
         ({"atc_code": "not-a-code"}, "atc_code"),
+        ({"price": "9999999999.99"}, "price"),
+        ({"price": "NaN"}, "price"),
     ],
 )
 def test_invalid_rows_rejected_with_reason(overrides, expected_fragment):

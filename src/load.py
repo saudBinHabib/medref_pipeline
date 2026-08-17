@@ -1,9 +1,27 @@
 """Staging + atomic upsert into the serving table (SPEC.md §5.5)."""
 
+import zlib
+
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from src.transform import CleanRecord
+
+# Deterministic (not process-randomized, unlike Python's hash()) lock key
+# identifying the medications_staging critical section, for
+# pg_advisory_xact_lock. Two concurrent pipeline runs both TRUNCATE and
+# repopulate `medications_staging`; without serializing them, one run's
+# staging write can be clobbered by another's TRUNCATE mid-batch.
+ADVISORY_LOCK_KEY = zlib.crc32(b"medref-pipeline:medications_staging")
+
+
+def _acquire_staging_lock(session: Session) -> None:
+    """Block until an exclusive, transaction-scoped lock on the staging
+    critical section is held. Released automatically on commit/rollback of
+    the caller's transaction (pg_advisory_xact_lock semantics) — no manual
+    unlock needed, and a crash never leaves the lock stuck.
+    """
+    session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": ADVISORY_LOCK_KEY})
 
 
 def write_staging(session: Session, records: list[CleanRecord]) -> None:
@@ -70,7 +88,11 @@ def load_batch(session: Session, records: list[CleanRecord]) -> None:
     """Write to staging then publish, inside the caller's transaction.
 
     Caller (src/pipeline.py) commits or rolls back the whole run, so a
-    failure anywhere in this function leaves `medications` untouched.
+    failure anywhere in this function leaves `medications` untouched. Takes
+    a `pg_advisory_xact_lock` first so two concurrent runs serialize on the
+    shared `medications_staging` table instead of racing on its
+    TRUNCATE/repopulate cycle.
     """
+    _acquire_staging_lock(session)
     write_staging(session, records)
     publish_staging(session)

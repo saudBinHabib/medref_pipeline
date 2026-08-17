@@ -4,7 +4,7 @@ import re
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from openai import OpenAI
-from pydantic import BaseModel
+from pydantic import BaseModel, RootModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -22,12 +22,57 @@ MEDICATION_COLUMNS = (
     "prescription_only, price, manufacturer_id, atc_code"
 )
 
+# Fixed, static SQL fragments (SPEC.md §7: no string-interpolated queries).
+# Every query below is assembled by concatenating/joining these named
+# constants — never by interpolating request data into SQL text. Bound
+# values always travel via `:param` placeholders.
+_MEDICATIONS_SELECT = "SELECT " + MEDICATION_COLUMNS + " FROM medications"
+_MEDICATIONS_COUNT = "SELECT COUNT(*) FROM medications"
+_ORDER_BY_PZN = " ORDER BY pzn"
+_LIMIT_OFFSET = " LIMIT :limit OFFSET :offset"
+
+# LIKE/ILIKE metacharacters must be escaped so user-supplied search text is
+# matched literally, never as a wildcard (SPEC.md §7 / avoid surprising
+# matches on `%`, `_`, `\`).
+_LIKE_ESCAPE_CHAR = "\\"
+_LIKE_ESCAPE_CLAUSE = f" ESCAPE '{_LIKE_ESCAPE_CHAR}'"
+
+
+def _escape_like_term(term: str) -> str:
+    """Escape LIKE/ILIKE wildcard metacharacters in user-supplied text."""
+    return (
+        term.replace(_LIKE_ESCAPE_CHAR, _LIKE_ESCAPE_CHAR * 2)
+        .replace("%", _LIKE_ESCAPE_CHAR + "%")
+        .replace("_", _LIKE_ESCAPE_CHAR + "_")
+    )
+
+
+def _contains_pattern(term: str) -> str:
+    """Build a `%term%` ILIKE pattern with `term` matched literally."""
+    return f"%{_escape_like_term(term)}%"
+
+
+def _where_sql(clauses: list[str]) -> str:
+    """Join a list of static, parameterized clause fragments into a WHERE clause."""
+    if not clauses:
+        return ""
+    return " WHERE " + " AND ".join(clauses)
+
 
 class MedicationListResponse(BaseModel):
     items: list[Medication]
     total: int
     limit: int
     offset: int
+
+
+class HealthResponse(BaseModel):
+    status: str
+    database: str
+
+
+class DosageFormStatsResponse(RootModel[dict[str, int]]):
+    """`{dosage_form: count}` (SPEC.md §6)."""
 
 
 def _row_to_medication(row) -> Medication:
@@ -39,13 +84,13 @@ def _row_to_medication(row) -> Medication:
     )
 
 
-@app.get("/health")
+@app.get("/health", response_model=HealthResponse)
 def health(db: Session = Depends(get_db)):  # noqa: B008
     try:
         db.execute(text("SELECT 1"))
     except Exception as exc:
         raise HTTPException(status_code=503, detail="database unavailable") from exc
-    return {"status": "ok", "database": "connected"}
+    return HealthResponse(status="ok", database="connected")
 
 
 @app.get("/v1/medications", response_model=MedicationListResponse)
@@ -69,19 +114,22 @@ def list_medications(
     if prescription_only is not None:
         where_clauses.append("prescription_only = :prescription_only")
         params["prescription_only"] = prescription_only
-    where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+    where_sql = _where_sql(where_clauses)
 
-    total = db.execute(text(f"SELECT COUNT(*) FROM medications {where_sql}"), params).scalar_one()
+    total = db.execute(text(_MEDICATIONS_COUNT + where_sql), params).scalar_one()
     rows = db.execute(
-        text(
-            f"SELECT {MEDICATION_COLUMNS} FROM medications {where_sql} "
-            "ORDER BY pzn LIMIT :limit OFFSET :offset"
-        ),
+        text(_MEDICATIONS_SELECT + where_sql + _ORDER_BY_PZN + _LIMIT_OFFSET),
         {**params, "limit": limit, "offset": offset},
     ).all()
     return MedicationListResponse(
         items=[_row_to_medication(r) for r in rows], total=total, limit=limit, offset=offset
     )
+
+
+_SEARCH_WHERE = (
+    " WHERE name ILIKE :pattern" + _LIKE_ESCAPE_CLAUSE
+    + " OR active_ingredient ILIKE :pattern" + _LIKE_ESCAPE_CLAUSE
+)
 
 
 @app.get("/v1/medications/search", response_model=MedicationListResponse)
@@ -91,20 +139,13 @@ def search_medications(
     offset: int = Query(default=0, ge=0),  # noqa: B008
     db: Session = Depends(get_db),  # noqa: B008
 ):
-    pattern = f"%{q}%"
+    pattern = _contains_pattern(q)
     total = db.execute(
-        text(
-            "SELECT COUNT(*) FROM medications "
-            "WHERE name ILIKE :pattern OR active_ingredient ILIKE :pattern"
-        ),
+        text(_MEDICATIONS_COUNT + _SEARCH_WHERE),
         {"pattern": pattern},
     ).scalar_one()
     rows = db.execute(
-        text(
-            f"SELECT {MEDICATION_COLUMNS} FROM medications "
-            "WHERE name ILIKE :pattern OR active_ingredient ILIKE :pattern "
-            "ORDER BY pzn LIMIT :limit OFFSET :offset"
-        ),
+        text(_MEDICATIONS_SELECT + _SEARCH_WHERE + _ORDER_BY_PZN + _LIMIT_OFFSET),
         {"pattern": pattern, "limit": limit, "offset": offset},
     ).all()
     return MedicationListResponse(
@@ -115,7 +156,7 @@ def search_medications(
 @app.get("/v1/medications/{pzn}", response_model=Medication)
 def get_medication(pzn: str, db: Session = Depends(get_db)):  # noqa: B008
     row = db.execute(
-        text(f"SELECT {MEDICATION_COLUMNS} FROM medications WHERE pzn = :pzn"),
+        text(_MEDICATIONS_SELECT + " WHERE pzn = :pzn"),
         {"pzn": pzn},
     ).first()
     if row is None:
@@ -123,12 +164,12 @@ def get_medication(pzn: str, db: Session = Depends(get_db)):  # noqa: B008
     return _row_to_medication(row)
 
 
-@app.get("/v1/stats/dosage-forms")
-def dosage_form_stats(db: Session = Depends(get_db)) -> dict[str, int]:  # noqa: B008
+@app.get("/v1/stats/dosage-forms", response_model=DosageFormStatsResponse)
+def dosage_form_stats(db: Session = Depends(get_db)):  # noqa: B008
     rows = db.execute(
         text("SELECT dosage_form, COUNT(*) AS count FROM medications GROUP BY dosage_form")
     ).all()
-    return {r.dosage_form: r.count for r in rows}
+    return DosageFormStatsResponse({r.dosage_form: r.count for r in rows})
 
 
 class AskRequest(BaseModel):
@@ -163,20 +204,29 @@ def _retrieve_candidates(db: Session, question: str, limit: int = 5):
 
     rows = []
     if tokens:
-        match_clauses = " OR ".join(
-            f"name ILIKE :tok{i} OR active_ingredient ILIKE :tok{i}" for i in range(len(tokens))
-        )
-        params = {f"tok{i}": f"%{tok}%" for i, tok in enumerate(tokens)}
+        def _token_clause(param_name: str) -> str:
+            # Static clause shape, one instance per token; `param_name` is a
+            # generated *parameter name* (e.g. "tok0") — the token text
+            # itself is never embedded here, only bound via `params` below
+            # (escaped, so it is matched literally, not as a wildcard).
+            return (
+                "name ILIKE :" + param_name + _LIKE_ESCAPE_CLAUSE
+                + " OR active_ingredient ILIKE :" + param_name + _LIKE_ESCAPE_CLAUSE
+            )
+
+        param_names = [f"tok{i}" for i in range(len(tokens))]
+        match_clauses = " OR ".join(_token_clause(name) for name in param_names)
+        params = {
+            name: _contains_pattern(tok)
+            for name, tok in zip(param_names, tokens, strict=True)
+        }
         rows = db.execute(
-            text(
-                f"SELECT {MEDICATION_COLUMNS} FROM medications "
-                f"WHERE {match_clauses} ORDER BY pzn LIMIT :limit"
-            ),
+            text(_MEDICATIONS_SELECT + " WHERE " + match_clauses + _ORDER_BY_PZN + " LIMIT :limit"),
             {**params, "limit": limit},
         ).all()
     if not rows:
         rows = db.execute(
-            text(f"SELECT {MEDICATION_COLUMNS} FROM medications ORDER BY pzn LIMIT :limit"),
+            text(_MEDICATIONS_SELECT + _ORDER_BY_PZN + " LIMIT :limit"),
             {"limit": limit},
         ).all()
     return rows

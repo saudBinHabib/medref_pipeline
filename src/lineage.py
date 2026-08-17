@@ -23,7 +23,20 @@ def start_run(session: Session, source_file: str) -> uuid.UUID:
 
 
 def content_hash(records: list[CleanRecord]) -> str:
-    """Stable, order-independent hash of the loaded batch."""
+    """Stable, order-independent hash of *this run's* loaded batch.
+
+    SPEC.md §3 describes `pipeline_runs.content_hash` as a "hash of the
+    loaded dataset". This hashes the `CleanRecord`s written by this run
+    (i.e. the batch passed to `load_batch`) — not a snapshot of the full
+    `medications` table afterwards. For a full feed (SPEC.md's `feed_v1.csv`)
+    those are the same set of rows, so re-running the same full feed twice
+    yields the same `content_hash` (idempotency is verified this way in
+    `tests/test_pipeline.py`). For a delta feed (`feed_v2_delta.csv`), the
+    hash reflects only the delta actually loaded in that run, not the whole
+    table — deliberate: it identifies *what this run loaded*, which is what
+    a run manifest/lineage record should attest to, rather than requiring an
+    extra full-table read on every run just to compute a hash.
+    """
     digest = hashlib.sha256()
     for r in sorted(records, key=lambda r: r.pzn):
         digest.update(

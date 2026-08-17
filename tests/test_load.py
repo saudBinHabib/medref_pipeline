@@ -1,12 +1,14 @@
 """SPEC.md §9 — atomic swap leaves a complete table; a mid-load failure leaves it intact."""
 
+import threading
 from decimal import Decimal
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
-from src.load import load_batch, write_staging
+from src.db import get_session_factory
+from src.load import ADVISORY_LOCK_KEY, load_batch, write_staging
 from src.transform import CleanRecord
 
 
@@ -120,3 +122,46 @@ def test_failure_after_staging_before_publish_leaves_prior_serving_table_intact(
 
     rows = clean_db.execute(text("SELECT pzn, name FROM medications")).all()
     assert [(r.pzn, r.name) for r in rows] == [("11111111", "Original")]
+
+
+def test_load_batch_serializes_concurrent_runs_via_advisory_lock(clean_db):
+    """I6: two concurrent pipeline runs must not race on TRUNCATE/repopulate
+    of the shared `medications_staging` table. `load_batch` takes a
+    `pg_advisory_xact_lock` first, so a second run blocks until the first
+    run's transaction (holding the same lock key) commits or rolls back.
+    """
+    manufacturer_id = _seed_manufacturer(clean_db)
+    clean_db.commit()  # visible to the separate connections used below
+
+    # Hold the lock on a separate connection, in an uncommitted transaction —
+    # simulates another pipeline run's load_batch() mid-flight.
+    holder_session = get_session_factory()()
+    holder_session.execute(
+        text("SELECT pg_advisory_xact_lock(:key)"), {"key": ADVISORY_LOCK_KEY}
+    )
+
+    result: dict = {}
+
+    def _run_second_load():
+        worker_session = get_session_factory()()
+        try:
+            load_batch(worker_session, [_record("11111111", "Second Run", manufacturer_id)])
+            worker_session.commit()
+            result["done"] = True
+        finally:
+            worker_session.close()
+
+    worker_thread = threading.Thread(target=_run_second_load)
+    worker_thread.start()
+    worker_thread.join(timeout=0.5)
+    assert not result.get("done"), "load_batch should block while the advisory lock is held"
+
+    # Releasing the holder's transaction releases the transaction-scoped lock.
+    holder_session.rollback()
+    holder_session.close()
+
+    worker_thread.join(timeout=5)
+    assert result.get("done") is True
+
+    rows = clean_db.execute(text("SELECT pzn, name FROM medications")).all()
+    assert [(r.pzn, r.name) for r in rows] == [("11111111", "Second Run")]

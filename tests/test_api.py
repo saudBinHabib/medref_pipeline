@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from src.api.main import _retrieve_candidates, app
+from src.api.main import _contains_pattern, _escape_like_term, _retrieve_candidates, app
 from src.db import get_db
 
 
@@ -52,7 +52,8 @@ def _seed_medication(
 def test_health_returns_ok(client):
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json()["status"] == "ok"
+    body = response.json()
+    assert body == {"status": "ok", "database": "connected"}
 
 
 def test_list_medications_returns_pagination_metadata(clean_db, client):
@@ -144,6 +145,32 @@ def test_search_returns_empty_when_no_match(clean_db, client):
     assert response.json()["items"] == []
 
 
+def test_search_treats_literal_underscore_as_literal_not_wildcard(clean_db, client):
+    # I10: unescaped, "_" is a single-char LIKE wildcard, so "A_C" would also
+    # match "ABC". A literal underscore in the query must only match a
+    # literal underscore.
+    _seed_medication(clean_db, "11111111", "A_C Formula")
+    _seed_medication(clean_db, "22222222", "ABC Formula")
+
+    response = client.get("/v1/medications/search", params={"q": "A_C"})
+
+    body = response.json()
+    assert [item["pzn"] for item in body["items"]] == ["11111111"]
+
+
+def test_search_treats_literal_percent_as_literal_not_wildcard(clean_db, client):
+    # I10: unescaped, "%" is a multi-char LIKE wildcard, so "10%20" would
+    # also match "10XX20". A literal "%" in the query must only match a
+    # literal "%".
+    _seed_medication(clean_db, "11111111", "10%20 Solution")
+    _seed_medication(clean_db, "22222222", "10XX20 Solution")
+
+    response = client.get("/v1/medications/search", params={"q": "10%20"})
+
+    body = response.json()
+    assert [item["pzn"] for item in body["items"]] == ["11111111"]
+
+
 def test_get_medication_by_pzn(clean_db, client):
     _seed_medication(clean_db, "11111111", "Alpha")
 
@@ -192,7 +219,14 @@ def test_stats_dosage_forms_groups_correctly(clean_db, client):
     response = client.get("/v1/stats/dosage-forms")
 
     assert response.status_code == 200
+    # I4: served via a Pydantic RootModel (DosageFormStatsResponse), but the
+    # wire format stays a flat {form: count} dict.
     assert response.json() == {"tablet": 2, "cream": 1}
+
+
+def test_escape_like_term_escapes_wildcard_metacharacters():
+    assert _escape_like_term("50%_off\\sale") == "50\\%\\_off\\\\sale"
+    assert _contains_pattern("a_c") == "%a\\_c%"
 
 
 def test_ask_endpoint_requires_api_key(client, monkeypatch):

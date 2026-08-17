@@ -3,12 +3,17 @@
 from decimal import Decimal
 
 from fastapi import Depends, FastAPI, HTTPException, Query
+from openai import OpenAI
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from src.config import get_settings
 from src.db import get_db
 from src.schema import ALLOWED_DOSAGE_FORMS
+
+DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+DEEPSEEK_MODEL = "deepseek-chat"
 
 app = FastAPI(title="medref-pipeline API", version="1.0.0")
 
@@ -136,3 +141,62 @@ def dosage_form_stats(db: Session = Depends(get_db)) -> dict[str, int]:  # noqa:
         text("SELECT dosage_form, COUNT(*) AS count FROM medications GROUP BY dosage_form")
     ).all()
     return {r.dosage_form: r.count for r in rows}
+
+
+class AskRequest(BaseModel):
+    question: str
+
+
+class AskResponse(BaseModel):
+    answer: str
+    pzns_cited: list[str]
+
+
+def _retrieve_candidates(db: Session, question: str, limit: int = 5):
+    pattern = f"%{question}%"
+    rows = db.execute(
+        text(
+            f"SELECT {MEDICATION_COLUMNS} FROM medications "
+            "WHERE name ILIKE :pattern OR active_ingredient ILIKE :pattern "
+            "LIMIT :limit"
+        ),
+        {"pattern": pattern, "limit": limit},
+    ).all()
+    if not rows:
+        rows = db.execute(
+            text(f"SELECT {MEDICATION_COLUMNS} FROM medications LIMIT :limit"),
+            {"limit": limit},
+        ).all()
+    return rows
+
+
+@app.post("/v1/ask", response_model=AskResponse)
+def ask(request: AskRequest, db: Session = Depends(get_db)):  # noqa: B008
+    settings = get_settings()
+    if not settings.deepseek_api_key:
+        raise HTTPException(status_code=503, detail="DEEPSEEK_API_KEY is not configured")
+
+    candidates = _retrieve_candidates(db, request.question)
+    context = "\n".join(
+        f"- PZN {r.pzn}: {r.name} ({r.active_ingredient}, {r.dosage_form}, {r.strength}, "
+        f"prescription_only={r.prescription_only}, price={r.price})"
+        for r in candidates
+    )
+    client = OpenAI(api_key=settings.deepseek_api_key, base_url=DEEPSEEK_BASE_URL)
+    completion = client.chat.completions.create(
+        model=DEEPSEEK_MODEL,
+        max_tokens=512,
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "Answer the question using only the medication rows below. "
+                    "Cite the PZN(s) you used.\n\n"
+                    f"Medications:\n{context}\n\nQuestion: {request.question}"
+                ),
+            }
+        ],
+    )
+    answer_text = completion.choices[0].message.content
+    cited = [r.pzn for r in candidates if r.pzn in answer_text]
+    return AskResponse(answer=answer_text, pzns_cited=cited)

@@ -159,3 +159,12 @@ def test_stats_dosage_forms_groups_correctly(clean_db, client):
 
     assert response.status_code == 200
     assert response.json() == {"tablet": 2, "cream": 1}
+
+
+def test_ask_endpoint_requires_api_key(client, monkeypatch):
+    class _NoKeySettings:
+        deepseek_api_key = None
+
+    monkeypatch.setattr("src.api.main.get_settings", lambda: _NoKeySettings())
+    response = client.post("/v1/ask", json={"question": "What treats headaches?"})
+    assert response.status_code == 503

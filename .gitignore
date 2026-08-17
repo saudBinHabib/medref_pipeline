@@ -8,3 +8,12 @@ dead_letter/*
 .ruff_cache/
 *.egg-info/
 .superpowers/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+infra/backend.hcl

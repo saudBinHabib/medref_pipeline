@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import logging
 import random
 import time
 from collections.abc import Callable
@@ -11,11 +12,15 @@ from pathlib import Path
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from src.config import get_settings
+
 # Resolved relative to this module's file, not the process cwd, so it works
 # regardless of where the pipeline/tests are invoked from.
 ATC_REFERENCE_CSV = Path(__file__).resolve().parent.parent / "data" / "atc_reference.csv"
 MAX_RETRIES = 5
 BASE_BACKOFF_SECONDS = 0.5
+
+logger = logging.getLogger(__name__)
 
 
 class AtcLookupExhausted(Exception):
@@ -81,13 +86,29 @@ def ensure_atc_reference_rows(session: Session, codes: set[str]) -> None:
     """Upsert data/atc_reference.csv rows for every ATC code referenced in a feed.
 
     Called before load so medications.atc_code FK resolves.
+
+    SPEC.md §5.4 describes a configurable flag for a remote terminology-API
+    fallback. `get_settings().atc_remote_lookup` is that flag. No production
+    remote fetcher is specified anywhere in this project (`lookup_atc`'s
+    remote path always requires an injected `fetch_fn`), so when the flag is
+    on and a code is still missing after the offline CSV lookup, we log a
+    warning instead of crashing or silently pretending the flag did nothing
+    — the offline-only result is unchanged either way.
     """
     if not codes:
         return
     descriptions = load_atc_reference_csv()
+    remote_lookup_enabled = get_settings().atc_remote_lookup
     for code in sorted(codes):
         description = descriptions.get(code)
         if description is None:
+            if remote_lookup_enabled:
+                logger.warning(
+                    "atc_remote_lookup is enabled but no production remote fetcher is "
+                    "configured; code=%s cannot be resolved and will be excluded "
+                    "(offline-only fallback)",
+                    code,
+                )
             continue
         session.execute(
             text(

@@ -36,6 +36,10 @@ def test_remote_lookup_retries_then_succeeds():
     assert result == "Paracetamol"
     assert attempts["count"] == 3
     assert len(sleeps) == 2
+    # Exponential backoff: each successive delay must be strictly larger than
+    # the last (a regression to constant-delay retries would slip past a bare
+    # len(sleeps) assertion).
+    assert sleeps[1] > sleeps[0]
 
 
 def test_remote_lookup_honors_retry_after():
@@ -65,3 +69,39 @@ def test_ensure_atc_reference_rows_upserts_missing_codes(clean_db):
 
     rows = clean_db.execute(text("SELECT atc_code FROM atc_reference ORDER BY atc_code")).all()
     assert [r[0] for r in rows] == ["M01AE01", "N02BE01"]
+
+
+def test_ensure_atc_reference_rows_excludes_code_absent_from_csv(clean_db):
+    """C3 regression coverage: a code absent from data/atc_reference.csv must be
+    excluded from atc_reference, not silently loaded — this is exactly the gap
+    that let the unknown-ATC bug through undetected across 10 task reviews.
+    """
+    ensure_atc_reference_rows(clean_db, {"N02BE01", "Z99ZZ99"})
+    clean_db.commit()
+
+    rows = clean_db.execute(text("SELECT atc_code FROM atc_reference ORDER BY atc_code")).all()
+    assert [r[0] for r in rows] == ["N02BE01"]
+
+
+def test_ensure_atc_reference_rows_logs_warning_when_remote_flag_enabled_but_unresolved(
+    clean_db, monkeypatch, caplog
+):
+    """I2: the ATC_REMOTE_LOOKUP flag is wired into ensure_atc_reference_rows.
+    No production remote fetcher exists anywhere in this project, so when the
+    flag is on and a code is still unresolved after the offline CSV, we log a
+    warning and fall back to offline-only behavior instead of crashing.
+    """
+    from src import enrich
+
+    class _RemoteEnabledSettings:
+        atc_remote_lookup = True
+
+    monkeypatch.setattr(enrich, "get_settings", lambda: _RemoteEnabledSettings())
+
+    with caplog.at_level("WARNING"):
+        enrich.ensure_atc_reference_rows(clean_db, {"Z99ZZ99"})
+    clean_db.commit()
+
+    rows = clean_db.execute(text("SELECT atc_code FROM atc_reference")).all()
+    assert rows == []
+    assert any("atc_remote_lookup" in record.message for record in caplog.records)

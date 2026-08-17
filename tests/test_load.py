@@ -74,7 +74,13 @@ def test_repeated_load_of_same_batch_is_idempotent(clean_db):
     assert len(rows) == 1
 
 
-def test_mid_load_failure_leaves_prior_serving_table_intact(clean_db):
+def test_load_failure_before_publish_leaves_prior_serving_table_intact(clean_db):
+    """The FK violation here happens inside write_staging (the INSERT into
+    medications_staging fails before publish_staging ever runs), so this is a
+    failure *before* publish, not a genuine mid-publish failure. Named to
+    reflect that honestly; see the test below for a failure induced between a
+    successful write_staging and the final commit.
+    """
     manufacturer_id = _seed_manufacturer(clean_db)
     load_batch(clean_db, [_record("11111111", "Original", manufacturer_id)])
     clean_db.commit()
@@ -82,6 +88,34 @@ def test_mid_load_failure_leaves_prior_serving_table_intact(clean_db):
     bad_batch = [_record("22222222", "Should Not Land", manufacturer_id=999999)]
     with pytest.raises(IntegrityError):
         load_batch(clean_db, bad_batch)
+    clean_db.rollback()
+
+    rows = clean_db.execute(text("SELECT pzn, name FROM medications")).all()
+    assert [(r.pzn, r.name) for r in rows] == [("11111111", "Original")]
+
+
+def test_failure_after_staging_before_publish_leaves_prior_serving_table_intact(
+    clean_db, monkeypatch
+):
+    """A genuine failure strictly between write_staging succeeding and the
+    final commit. publish_staging is a single atomic INSERT...SELECT, so
+    there is no reachable *partial* publish to simulate honestly — the
+    closest real failure mode is the caller's transaction dying after
+    staging is written but before publish (or its commit) completes. We
+    force that here by making publish_staging itself raise, then roll back,
+    same as src/pipeline.py does on any exception.
+    """
+    manufacturer_id = _seed_manufacturer(clean_db)
+    load_batch(clean_db, [_record("11111111", "Original", manufacturer_id)])
+    clean_db.commit()
+
+    def _boom(session):
+        raise RuntimeError("simulated failure between staging write and publish")
+
+    monkeypatch.setattr("src.load.publish_staging", _boom)
+
+    with pytest.raises(RuntimeError):
+        load_batch(clean_db, [_record("33333333", "Should Not Land", manufacturer_id)])
     clean_db.rollback()
 
     rows = clean_db.execute(text("SELECT pzn, name FROM medications")).all()

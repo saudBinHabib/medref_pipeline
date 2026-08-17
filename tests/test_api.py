@@ -21,7 +21,8 @@ def client(clean_db):
 
 
 def _seed_medication(
-    session, pzn, name, dosage_form="tablet", prescription_only=False, price="9.99"
+    session, pzn, name, dosage_form="tablet", prescription_only=False, price="9.99",
+    atc_code=None,
 ):
     manufacturer_id = session.execute(
         text(
@@ -37,12 +38,12 @@ def _seed_medication(
             "(pzn, name, active_ingredient, dosage_form, strength, "
             " prescription_only, price, manufacturer_id, atc_code) "
             "VALUES (:pzn, :name, 'Paracetamol', :dosage_form, '500mg', "
-            "        :prescription_only, :price, :manufacturer_id, NULL)"
+            "        :prescription_only, :price, :manufacturer_id, :atc_code)"
         ),
         {
             "pzn": pzn, "name": name, "dosage_form": dosage_form,
             "prescription_only": prescription_only, "price": Decimal(price),
-            "manufacturer_id": manufacturer_id,
+            "manufacturer_id": manufacturer_id, "atc_code": atc_code,
         },
     )
     session.commit()
@@ -122,6 +123,18 @@ def test_search_matches_name_case_insensitively(clean_db, client):
     assert body["items"][0]["pzn"] == "11111111"
 
 
+def test_search_matches_active_ingredient_case_insensitively(clean_db, client):
+    # SPEC.md §6 requires search to match on active_ingredient, not just name.
+    # _seed_medication always seeds active_ingredient='Paracetamol'.
+    _seed_medication(clean_db, "11111111", "Some Brand Name")
+
+    response = client.get("/v1/medications/search", params={"q": "paracetamol"})
+
+    body = response.json()
+    assert body["total"] == 1
+    assert body["items"][0]["pzn"] == "11111111"
+
+
 def test_search_returns_empty_when_no_match(clean_db, client):
     _seed_medication(clean_db, "11111111", "Alpha")
 
@@ -138,6 +151,27 @@ def test_get_medication_by_pzn(clean_db, client):
 
     assert response.status_code == 200
     assert response.json()["name"] == "Alpha"
+
+
+def test_get_medication_round_trips_non_null_atc_code(clean_db, client):
+    # Every other seeded test row has atc_code = NULL; confirm a non-null
+    # atc_code round-trips correctly (the atc_reference row must exist first
+    # to satisfy the FK).
+    clean_db.execute(
+        text(
+            "INSERT INTO atc_reference (atc_code, atc_description) "
+            "VALUES (:code, :description) "
+            "ON CONFLICT (atc_code) DO NOTHING"
+        ),
+        {"code": "N02BE01", "description": "Paracetamol"},
+    )
+    clean_db.commit()
+    _seed_medication(clean_db, "11111111", "Alpha", atc_code="N02BE01")
+
+    response = client.get("/v1/medications/11111111")
+
+    assert response.status_code == 200
+    assert response.json()["atc_code"] == "N02BE01"
 
 
 def test_get_medication_returns_404_for_unknown_pzn(client):

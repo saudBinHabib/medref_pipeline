@@ -1,7 +1,5 @@
 """FastAPI serving layer (SPEC.md §6). Read-only over the `medications` table."""
 
-from decimal import Decimal
-
 from fastapi import Depends, FastAPI, HTTPException, Query
 from openai import OpenAI
 from pydantic import BaseModel
@@ -10,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from src.config import get_settings
 from src.db import get_db
-from src.schema import ALLOWED_DOSAGE_FORMS
+from src.schema import ALLOWED_DOSAGE_FORMS, Medication
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_MODEL = "deepseek-chat"
@@ -23,27 +21,15 @@ MEDICATION_COLUMNS = (
 )
 
 
-class MedicationOut(BaseModel):
-    pzn: str
-    name: str
-    active_ingredient: str
-    dosage_form: str
-    strength: str
-    prescription_only: bool
-    price: Decimal
-    manufacturer_id: int
-    atc_code: str | None = None
-
-
 class MedicationListResponse(BaseModel):
-    items: list[MedicationOut]
+    items: list[Medication]
     total: int
     limit: int
     offset: int
 
 
-def _row_to_medication(row) -> MedicationOut:
-    return MedicationOut(
+def _row_to_medication(row) -> Medication:
+    return Medication(
         pzn=row.pzn, name=row.name, active_ingredient=row.active_ingredient,
         dosage_form=row.dosage_form, strength=row.strength,
         prescription_only=row.prescription_only, price=row.price,
@@ -124,7 +110,7 @@ def search_medications(
     )
 
 
-@app.get("/v1/medications/{pzn}", response_model=MedicationOut)
+@app.get("/v1/medications/{pzn}", response_model=Medication)
 def get_medication(pzn: str, db: Session = Depends(get_db)):  # noqa: B008
     row = db.execute(
         text(f"SELECT {MEDICATION_COLUMNS} FROM medications WHERE pzn = :pzn"),

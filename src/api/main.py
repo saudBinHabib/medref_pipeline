@@ -1,5 +1,7 @@
 """FastAPI serving layer (SPEC.md §6). Read-only over the `medications` table."""
 
+import re
+
 from fastapi import Depends, FastAPI, HTTPException, Query
 from openai import OpenAI
 from pydantic import BaseModel
@@ -138,19 +140,43 @@ class AskResponse(BaseModel):
     pzns_cited: list[str]
 
 
+# Very short/common words carry no retrieval signal and would just widen the
+# ILIKE match to everything; drop them before building the token query.
+_ASK_STOPWORDS = {
+    "the", "a", "an", "is", "are", "was", "were", "for", "of", "in", "on",
+    "to", "and", "or", "what", "which", "who", "whom", "does", "do", "did",
+    "can", "with", "about", "treat", "treats", "used", "use", "this", "that",
+}
+
+
 def _retrieve_candidates(db: Session, question: str, limit: int = 5):
-    pattern = f"%{question}%"
-    rows = db.execute(
-        text(
-            f"SELECT {MEDICATION_COLUMNS} FROM medications "
-            "WHERE name ILIKE :pattern OR active_ingredient ILIKE :pattern "
-            "LIMIT :limit"
-        ),
-        {"pattern": pattern, "limit": limit},
-    ).all()
+    """Find medication rows relevant to a free-text question.
+
+    Tokenizes the question and ILIKE-matches each meaningful token against
+    name or active_ingredient (OR'd together), rather than matching the
+    entire raw sentence as one literal substring (which essentially never
+    matches a medication name). Falls back to an unfiltered, deterministically
+    ordered page when no token matches anything.
+    """
+    tokens = [t for t in re.findall(r"[A-Za-z0-9]+", question.lower()) if len(t) > 2]
+    tokens = [t for t in tokens if t not in _ASK_STOPWORDS]
+
+    rows = []
+    if tokens:
+        match_clauses = " OR ".join(
+            f"name ILIKE :tok{i} OR active_ingredient ILIKE :tok{i}" for i in range(len(tokens))
+        )
+        params = {f"tok{i}": f"%{tok}%" for i, tok in enumerate(tokens)}
+        rows = db.execute(
+            text(
+                f"SELECT {MEDICATION_COLUMNS} FROM medications "
+                f"WHERE {match_clauses} ORDER BY pzn LIMIT :limit"
+            ),
+            {**params, "limit": limit},
+        ).all()
     if not rows:
         rows = db.execute(
-            text(f"SELECT {MEDICATION_COLUMNS} FROM medications LIMIT :limit"),
+            text(f"SELECT {MEDICATION_COLUMNS} FROM medications ORDER BY pzn LIMIT :limit"),
             {"limit": limit},
         ).all()
     return rows
@@ -168,7 +194,9 @@ def ask(request: AskRequest, db: Session = Depends(get_db)):  # noqa: B008
         f"prescription_only={r.prescription_only}, price={r.price})"
         for r in candidates
     )
-    client = OpenAI(api_key=settings.deepseek_api_key, base_url=DEEPSEEK_BASE_URL)
+    # timeout=: this route handler is sync, so FastAPI runs it on a bounded
+    # threadpool — an unbounded hung upstream call would tie up a worker slot.
+    client = OpenAI(api_key=settings.deepseek_api_key, base_url=DEEPSEEK_BASE_URL, timeout=30.0)
     completion = client.chat.completions.create(
         model=DEEPSEEK_MODEL,
         max_tokens=512,
@@ -184,5 +212,9 @@ def ask(request: AskRequest, db: Session = Depends(get_db)):  # noqa: B008
         ],
     )
     answer_text = completion.choices[0].message.content
+    # The OpenAI SDK types completion content as `str | None`; a null/empty
+    # completion must not crash the request with an unhandled TypeError.
+    if not answer_text:
+        raise HTTPException(status_code=502, detail="LLM returned an empty completion")
     cited = [r.pzn for r in candidates if r.pzn in answer_text]
     return AskResponse(answer=answer_text, pzns_cited=cited)

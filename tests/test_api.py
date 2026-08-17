@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from src.api.main import app
+from src.api.main import _retrieve_candidates, app
 from src.db import get_db
 
 
@@ -202,3 +202,60 @@ def test_ask_endpoint_requires_api_key(client, monkeypatch):
     monkeypatch.setattr("src.api.main.get_settings", lambda: _NoKeySettings())
     response = client.post("/v1/ask", json={"question": "What treats headaches?"})
     assert response.status_code == 503
+
+
+def test_retrieve_candidates_matches_token_within_a_full_question(clean_db):
+    # I4 regression: the old implementation ILIKE-matched the entire raw
+    # question as one literal substring, which essentially never matched a
+    # medication name, so it always fell through to the unfiltered fallback.
+    _seed_medication(clean_db, "11111111", "Aspiron")
+    _seed_medication(clean_db, "22222222", "Unrelated Drug")
+
+    rows = _retrieve_candidates(clean_db, "What does Aspiron help with?")
+
+    assert [r.pzn for r in rows] == ["11111111"]
+
+
+def test_retrieve_candidates_fallback_is_deterministically_ordered(clean_db):
+    # I4: the unfiltered fallback query previously had no ORDER BY.
+    _seed_medication(clean_db, "22222222", "Beta")
+    _seed_medication(clean_db, "11111111", "Alpha")
+
+    rows = _retrieve_candidates(clean_db, "zzzznonsensequery that matches nothing")
+
+    assert [r.pzn for r in rows] == ["11111111", "22222222"]
+
+
+def test_ask_endpoint_returns_502_on_null_llm_completion(client, monkeypatch):
+    # I5: completion.choices[0].message.content is typed str | None by the
+    # OpenAI SDK; a null completion must not crash with an unhandled 500.
+    class _KeyedSettings:
+        deepseek_api_key = "fake-key"
+
+    monkeypatch.setattr("src.api.main.get_settings", lambda: _KeyedSettings())
+
+    class _FakeMessage:
+        content = None
+
+    class _FakeChoice:
+        message = _FakeMessage()
+
+    class _FakeCompletion:
+        choices = [_FakeChoice()]
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            return _FakeCompletion()
+
+    class _FakeChat:
+        completions = _FakeCompletions()
+
+    class _FakeClient:
+        def __init__(self, *args, **kwargs):
+            self.chat = _FakeChat()
+
+    monkeypatch.setattr("src.api.main.OpenAI", _FakeClient)
+
+    response = client.post("/v1/ask", json={"question": "What treats headaches?"})
+
+    assert response.status_code == 502

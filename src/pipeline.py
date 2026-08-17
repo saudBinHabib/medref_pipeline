@@ -19,8 +19,13 @@ logger = logging.getLogger(__name__)
 def run_pipeline(feed_path: Path, dead_letter_dir: Path = Path("dead_letter")) -> int:
     """Run one pipeline pass over `feed_path`. Returns 0 on success, 1 on failure."""
     session = get_session_factory()()
-    run_id = start_run(session, source_file=str(feed_path))
-    session.commit()  # run row is visible even if the rest of the run fails
+    try:
+        run_id = start_run(session, source_file=str(feed_path))
+        session.commit()  # run row is visible even if the rest of the run fails
+    except Exception:
+        logger.exception("pipeline failed to initialize run")
+        session.close()
+        return 1
 
     rows_in = 0
     rows_out = 0

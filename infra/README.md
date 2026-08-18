@@ -7,7 +7,7 @@ cost estimate), see [`../AWS_Deployment_Plan.md`](../AWS_Deployment_Plan.md)
 
 ## Architecture
 
-![Infrastructure diagram: client and GitHub reach an ALB and OIDC deploy role inside the AWS account; the ECS API service sits in a public subnet behind the ALB, talks to RDS in an isolated subnet, and calls out to api.deepseek.com; an EventBridge schedule runs the pipeline task against S3 raw-landing and dead-letter buckets; all ECS tasks share one ECR image and read Secrets Manager; Phase 4 CI/CD (amber) is coded but not yet applied](https://claude.ai/code/artifact/fe2f0303-1334-4a07-9ce3-b759cdd7abcd?via=auto_preview)
+Infrastructure diagram: client and GitHub reach an ALB and OIDC deploy role inside the AWS account; the ECS API service sits in a public subnet behind the ALB, talks to RDS in an isolated subnet, and calls out to api.deepseek.com; an EventBridge schedule runs the pipeline task against S3 raw-landing and dead-letter buckets; all ECS tasks share one ECR image and read Secrets Manager; Phase 4 CI/CD (amber) is coded but not yet applied [Infrastructure](https://claude.ai/code/artifact/fe2f0303-1334-4a07-9ce3-b759cdd7abcd?via=auto_preview)
 
 Every box is a real resource in `infra/modules/`; every arrow is a real
 network hop or API call. Solid boundaries are applied and live (Steps 1–7
